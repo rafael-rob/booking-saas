@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  extensions = [pg_trgm]
+}
+
+model User {
+  id                 String         @id @default(cuid())
+  email              String         @unique
+  name               String?
+  businessName       String?
+  phone              String?
+  image              String?
+  password           String
+  emailVerified      DateTime?
+  stripeCustomerId   String?
+  subscriptionStatus String?        @default("trial")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  accounts           Account[]
+  availabilities     Availability[]
+  bookings           Booking[]
+  clients            Client[]
+  services           Service[]
+  sessions           Session[]
+
+  @@index([email])
+  @@index([subscriptionStatus])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expires])
+  @@map("sessions")
+}
+
+model Service {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  duration    Int
+  price       Float
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  bookings    Booking[]
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([userId, isActive])
+  @@index([price])
+  @@index([createdAt])
+  @@fulltext([name, description])
+  @@map("services")
+}
+
+model Availability {
+  id          String    @id @default(cuid())
+  userId      String
+  dayOfWeek   Int
+  startTime   String
+  endTime     String
+  isRecurring Boolean   @default(true)
+  date        DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([dayOfWeek])
+  @@index([userId, dayOfWeek])
+  @@index([isRecurring])
+  @@index([date])
+  @@map("availabilities")
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  userId          String
+  serviceId       String
+  clientId        String?
+  clientName      String
+  clientEmail     String
+  clientPhone     String?
+  startTime       DateTime
+  endTime         DateTime
+  status          BookingStatus @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  stripePaymentId String?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  client          Client?       @relation(fields: [clientId], references: [id])
+  service         Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([serviceId])
+  @@index([clientId])
+  @@index([status])
+  @@index([startTime])
+  @@index([endTime])
+  @@index([userId, status])
+  @@index([userId, startTime])
+  @@index([serviceId, startTime, endTime])
+  @@index([clientEmail])
+  @@index([createdAt])
+  @@map("bookings")
+}
+
+model Client {
+  id            String    @id @default(cuid())
+  userId        String
+  name          String
+  email         String
+  phone         String?
+  totalBookings Int       @default(0)
+  lastBookingAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  bookings      Booking[]
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+  @@index([userId])
+  @@index([email])
+  @@index([totalBookings])
+  @@index([lastBookingAt])
+  @@index([createdAt])
+  @@fulltext([name])
+  @@map("clients")
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}

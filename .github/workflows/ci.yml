@@ -1,0 +1,244 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+  
+jobs:
+  # Job 1: Tests and Quality Checks
+  test:
+    name: 🧪 Tests & Quality
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: booking_saas_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: 📦 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Setup test environment
+        run: |
+          cp .env.example .env.test
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/booking_saas_test" >> .env.test
+          echo "NEXTAUTH_SECRET=$(openssl rand -base64 64)" >> .env.test
+          echo "NODE_ENV=test" >> .env.test
+
+      - name: 🗄️ Run database migrations
+        run: |
+          npx prisma generate
+          npx prisma db push --accept-data-loss
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/booking_saas_test
+
+      - name: 🔍 Lint code
+        run: npm run lint
+
+      - name: 🔍 Type check
+        run: npx tsc --noEmit
+
+      - name: 🧪 Run unit tests
+        run: npm test -- --coverage --watchAll=false
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/booking_saas_test
+          NEXTAUTH_SECRET: test-secret-for-ci
+          NEXTAUTH_URL: http://localhost:3000
+
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: 🔒 Security audit
+        run: npm audit --audit-level critical
+        continue-on-error: false
+
+      - name: 🔍 Check for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  # Job 2: Build Verification
+  build:
+    name: 🏗️ Build Check
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: 📦 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Setup build environment
+        run: |
+          echo "DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy" > .env.local
+          echo "NEXTAUTH_SECRET=$(openssl rand -base64 64)" >> .env.local
+          echo "NEXTAUTH_URL=http://localhost:3000" >> .env.local
+          echo "STRIPE_SECRET_KEY=sk_test_dummy" >> .env.local
+          echo "STRIPE_PUBLISHABLE_KEY=pk_test_dummy" >> .env.local
+          echo "STRIPE_WEBHOOK_SECRET=whsec_dummy" >> .env.local
+
+      - name: 🗄️ Generate Prisma client
+        run: npx prisma generate
+
+      - name: 🏗️ Build application
+        run: npm run build
+        env:
+          SKIP_ENV_VALIDATION: true
+
+      - name: 📦 Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .next/cache
+            .next/static
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+
+  # Job 3: Security Scan
+  security:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: 📦 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔒 Run Snyk security scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: 🔍 OWASP ZAP baseline scan
+        if: github.event_name == 'pull_request'
+        uses: zaproxy/action-baseline@v0.11.0
+        with:
+          target: 'http://localhost:3000'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+
+  # Job 4: Performance Tests
+  performance:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: build
+
+    steps:
+      - name: 📦 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Setup environment
+        run: |
+          echo "DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy" > .env.local
+          echo "NEXTAUTH_SECRET=$(openssl rand -base64 64)" >> .env.local
+          echo "NEXTAUTH_URL=http://localhost:3000" >> .env.local
+          echo "STRIPE_SECRET_KEY=sk_test_dummy" >> .env.local
+          echo "STRIPE_PUBLISHABLE_KEY=pk_test_dummy" >> .env.local
+          echo "STRIPE_WEBHOOK_SECRET=whsec_dummy" >> .env.local
+
+      - name: 🗄️ Generate Prisma client
+        run: npx prisma generate
+
+      - name: 🏗️ Build application
+        run: npm run build
+        env:
+          SKIP_ENV_VALIDATION: true
+
+      - name: 🚀 Start application
+        run: |
+          npm start &
+          sleep 30
+        env:
+          PORT: 3000
+
+      - name: ⚡ Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          configPath: './lighthouse.config.json'
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+  # Job 5: Notify Results
+  notify:
+    name: 📢 Notify Results
+    runs-on: ubuntu-latest
+    needs: [test, build, security]
+    if: always()
+
+    steps:
+      - name: 📢 Notify on success
+        if: needs.test.result == 'success' && needs.build.result == 'success'
+        run: echo "✅ All checks passed! Ready for deployment."
+
+      - name: 📢 Notify on failure
+        if: needs.test.result == 'failure' || needs.build.result == 'failure' || needs.security.result == 'failure'
+        run: |
+          echo "❌ Some checks failed:"
+          echo "Tests: ${{ needs.test.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          echo "Security: ${{ needs.security.result }}"
+          exit 1

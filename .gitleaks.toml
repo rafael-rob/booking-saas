@@ -1,0 +1,82 @@
+# Gitleaks configuration for detecting secrets
+
+title = "Booking SaaS Security Configuration"
+
+[extend]
+# useDefault will extend the base configuration with the default gitleaks config:
+# https://github.com/zricethezav/gitleaks/blob/master/config/gitleaks.toml
+useDefault = true
+
+[[rules]]
+description = "NextAuth Secret"
+id = "nextauth-secret"
+regex = '''(?i)nextauth_secret\s*[:=]\s*["']?([a-zA-Z0-9+/]{20,})["']?'''
+secretGroup = 1
+
+[[rules]]
+description = "Database URL with credentials"
+id = "database-url"
+regex = '''(?i)database_url\s*[:=]\s*["']?postgresql://[^:]+:[^@]+@[^/]+/[^"'\s]+["']?'''
+
+[[rules]]
+description = "Stripe Secret Key"
+id = "stripe-secret"
+regex = '''(?i)stripe[_-]?secret[_-]?key\s*[:=]\s*["']?(sk_live_[a-zA-Z0-9]{20,})["']?'''
+secretGroup = 1
+
+[[rules]]
+description = "Stripe Test Key"
+id = "stripe-test"
+regex = '''(?i)stripe[_-]?secret[_-]?key\s*[:=]\s*["']?(sk_test_[a-zA-Z0-9]{20,})["']?'''
+secretGroup = 1
+
+[[rules]]
+description = "Twilio Auth Token"
+id = "twilio-token"
+regex = '''(?i)twilio[_-]?auth[_-]?token\s*[:=]\s*["']?([a-f0-9]{32})["']?'''
+secretGroup = 1
+
+[[rules]]
+description = "Google Client Secret"
+id = "google-client-secret"
+regex = '''(?i)google[_-]?client[_-]?secret\s*[:=]\s*["']?([a-zA-Z0-9_-]{20,})["']?'''
+secretGroup = 1
+
+[[rules]]
+description = "SMTP Password"
+id = "smtp-password"
+regex = '''(?i)smtp[_-]?password\s*[:=]\s*["']?([^\s"']+)["']?'''
+secretGroup = 1
+
+[allowlist]
+description = "Allowlist for test files and documentation"
+files = [
+    '''.*\.test\.(js|ts|jsx|tsx)$''',
+    '''.*\.spec\.(js|ts|jsx|tsx)$''',
+    '''.*\.md$''',
+    '''jest\.(config|setup)\.js$''',
+    '''\.env\.example$''',
+]
+
+commits = []
+
+paths = [
+    '''node_modules/''',
+    '''.next/''',
+    '''coverage/''',
+    '''dist/''',
+    '''build/''',
+]
+
+regexes = [
+    # Allow placeholder values
+    '''sk_test_dummy''',
+    '''pk_test_dummy''',
+    '''whsec_dummy''',
+    '''test-secret-for-testing''',
+    '''dummy:dummy@localhost''',
+    # Allow documentation examples
+    '''your-[a-z-]+''',
+    '''example\.com''',
+    '''localhost:5432''',
+]
